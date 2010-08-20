@@ -1,0 +1,16 @@
+automaton-urlfilter.txt
+capacity-scheduler.xml
+core-site.xml
+crawl-urlfilter.txt
+hadoop-env.sh
+hadoop-policy.xml
+hdfs-site.xml
+httpclient-auth.xml
+mapred-site.xml
+nutch-site.xml
+prefix-urlfilter.txt
+regex-normalize.xml
+regex-urlfilter.txt
+slaves
+subcollections.xml
+suffix-urlfilter.txt
