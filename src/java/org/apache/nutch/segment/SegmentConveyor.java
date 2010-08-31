@@ -31,11 +31,13 @@ import org.apache.nutch.protocol.Content;
 import org.apache.nutch.util.LogUtil;
 
 public class SegmentConveyor extends Configured implements Tool {
+    public static final String DEFAULT_USER_AGENT = "ufl-webadmin-crawler-conveyor";
     public static final long DEFAULT_SLEEP_TIME = 500; // milliseconds
     private static final Log LOG = LogFactory.getLog(SegmentConveyor.class);
 
     public static class Map extends Mapper<Text, Writable, Text, NullWritable> {
         private URL[] services = null;
+        private String userAgent = null;
         private long sleepTime = 0;
 
         public void setup(Context context) throws IOException,
@@ -50,6 +52,7 @@ public class SegmentConveyor extends Configured implements Tool {
                 this.services[i] = new URL(urls[i]);
             }
 
+            this.userAgent = conf.get("segment.conveyor.user.agent");
             this.sleepTime = conf.getLong("segment.conveyor.sleep.time",
                     DEFAULT_SLEEP_TIME);
         }
@@ -81,6 +84,8 @@ public class SegmentConveyor extends Configured implements Tool {
 
             HttpURLConnection conn = (HttpURLConnection) service.openConnection();
             conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            conn.setRequestProperty("User-Agent", this.userAgent);
             conn.setDoOutput(true);
 
             OutputStreamWriter out = new OutputStreamWriter(conn.getOutputStream());
@@ -123,10 +128,11 @@ public class SegmentConveyor extends Configured implements Tool {
         }
     }
 
-    public int run(String segment, String[] urls, long sleepTime)
+    public int run(String segment, String[] urls, String userAgent, long sleepTime)
             throws IOException, InterruptedException, ClassNotFoundException {
         Configuration conf = this.getConf();
         conf.setStrings("segment.conveyor.urls", urls);
+        conf.set("segment.conveyor.user.agent", userAgent);
         conf.setLong("segment.conveyor.sleep.time", sleepTime);
 
         Job job = new Job(conf);
@@ -154,6 +160,7 @@ public class SegmentConveyor extends Configured implements Tool {
             ClassNotFoundException {
         String segment = null;
         ArrayList<String> urls = new ArrayList<String>();
+        String userAgent = DEFAULT_USER_AGENT;
         long sleepTime = DEFAULT_SLEEP_TIME;
 
         for (int i = 0; i < args.length; i++) {
@@ -162,6 +169,9 @@ public class SegmentConveyor extends Configured implements Tool {
             }
             else if (args[i].equals("-u")) {
                 urls.add(args[++i]);
+            }
+            else if (args[i].equals("-a")) {
+                userAgent = args[++i];
             }
             else if (args[i].equals("-t")) {
                 sleepTime = Long.parseLong(args[++i]);
@@ -174,12 +184,12 @@ public class SegmentConveyor extends Configured implements Tool {
         }
 
         String[] u = new String[urls.size()];
-        return this.run(segment, urls.toArray(u), sleepTime);
+        return this.run(segment, urls.toArray(u), userAgent, sleepTime);
     }
 
     private static void usage() {
         System.err.println("Usage: SegmentConveyor "
-                + "-s <segment_dir> -u <url> [-u <url> ...] [-t <sleep_time>]");
+                + "-s <segment_dir> -u <url> [-u <url> ...] [-a <user_agent>] [-t <sleep_time>]");
     }
 
     public static void main(String[] args) throws Exception {
