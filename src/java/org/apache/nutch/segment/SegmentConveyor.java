@@ -1,15 +1,12 @@
 package org.apache.nutch.segment;
 
 import java.io.IOException;
-import java.io.OutputStreamWriter;
-import java.io.UnsupportedEncodingException;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLEncoder;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map.Entry;
 
+import org.apache.commons.httpclient.HttpClient;
+import org.apache.commons.httpclient.NameValuePair;
+import org.apache.commons.httpclient.methods.PostMethod;
+import org.apache.commons.httpclient.params.HttpClientParams;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -36,9 +33,9 @@ public class SegmentConveyor extends Configured implements Tool {
     private static final Log LOG = LogFactory.getLog(SegmentConveyor.class);
 
     public static class Map extends Mapper<Text, Writable, Text, NullWritable> {
-        private URL[] services = null;
-        private String userAgent = null;
+        private String[] services = null;
         private long sleepTime = 0;
+        private HttpClient client = new HttpClient();
 
         public void setup(Context context) throws IOException,
                 InterruptedException {
@@ -46,15 +43,14 @@ public class SegmentConveyor extends Configured implements Tool {
 
             Configuration conf = context.getConfiguration();
 
-            String[] urls = conf.getStrings("segment.conveyor.urls");
-            this.services = new URL[urls.length];
-            for (int i = 0; i < urls.length; i++) {
-                this.services[i] = new URL(urls[i]);
-            }
-
-            this.userAgent = conf.get("segment.conveyor.user.agent");
+            this.services = conf.getStrings("segment.conveyor.urls");
             this.sleepTime = conf.getLong("segment.conveyor.sleep.time",
                     DEFAULT_SLEEP_TIME);
+
+            String userAgent = conf.get("segment.conveyor.useragent");
+            HttpClientParams params = new HttpClientParams();
+            params.setParameter("http.useragent", userAgent);
+            client.setParams(params);
         }
 
         public void map(Text key, Writable value, Context context)
@@ -62,77 +58,60 @@ public class SegmentConveyor extends Configured implements Tool {
             Content content = (Content) value;
 
             String url = content.getUrl();
-            String body = this.getBody(content);
+            NameValuePair[] body = this.getBody(content);
 
-            for (URL service : this.services) {
-                try {
-                    this.send(url, body, service);
-                }
-                catch (IOException e) {
-                    e.printStackTrace(LogUtil.getWarnStream(LOG));
-                }
-
+            for (String service : this.services) {
+                this.send(url, body, service);
                 Thread.sleep(this.sleepTime);
             }
 
             context.write(key, NullWritable.get());
         }
 
-        private void send(String url, String body, URL service)
-                throws IOException {
-            LOG.info("Sending [" + url + "] to [" + service + "]");
+        private void send(String url, NameValuePair[] body, String service) {
+            PostMethod method = new PostMethod(service);
 
-            HttpURLConnection conn = (HttpURLConnection) service.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-            conn.setRequestProperty("User-Agent", this.userAgent);
-            conn.setDoOutput(true);
+            try {
+                LOG.info("Sending [" + url + "] to [" + service + "]");
 
-            OutputStreamWriter out = new OutputStreamWriter(conn.getOutputStream());
-            out.write(body);
-            out.close();
+                method.addParameters(body);
+                int status = this.client.executeMethod(method);
 
-            LOG.info("Got [" + conn.getResponseCode() + "] from [" + service + "]");
-        }
-
-        private String getBody(Content content)
-                throws UnsupportedEncodingException {
-            HashMap<String, String> parameters = this.getParameters(content);
-
-            StringBuffer body = new StringBuffer();
-            for (Entry<String, String> entry : parameters.entrySet()) {
-                body.append(URLEncoder.encode(entry.getKey(), "UTF-8"));
-                body.append("=");
-                body.append(URLEncoder.encode(entry.getValue(), "UTF-8"));
-                body.append("&");
+                LOG.info("Got [" + status + "] from [" + service + "]");
             }
-
-            return body.substring(0, body.length() - 1);
+            catch (Exception e) {
+                e.printStackTrace(LogUtil.getWarnStream(LOG));
+            }
+            finally {
+                method.releaseConnection();
+            }
         }
 
-        private HashMap<String, String> getParameters(Content content) {
-            HashMap<String, String> parameters = new HashMap<String, String>();
+        private NameValuePair[] getBody(Content content) {
+            ArrayList<NameValuePair> body = new ArrayList<NameValuePair>();
 
-            parameters.put("url", content.getUrl());
-            parameters.put("content", new String(content.getContent()));
+            body.add(new NameValuePair("url", content.getUrl()));
+            body.add(new NameValuePair("content", new String(content.getContent())));
 
             Metadata metadata = content.getMetadata();
             for (String key : metadata.names()) {
                 String[] values = metadata.getValues(key);
                 for (String value : values) {
-                    parameters.put(key, value);
+                    body.add(new NameValuePair("metadata[" + key + "]", value));
                 }
             }
 
-            return parameters;
+            NameValuePair[] b = new NameValuePair[body.size()];
+            return body.toArray(b);
         }
     }
 
-    public int run(String segment, String[] urls, String userAgent, long sleepTime)
-            throws IOException, InterruptedException, ClassNotFoundException {
+    public int run(String segment, String[] urls, String userAgent,
+            long sleepTime) throws IOException, InterruptedException,
+            ClassNotFoundException {
         Configuration conf = this.getConf();
         conf.setStrings("segment.conveyor.urls", urls);
-        conf.set("segment.conveyor.user.agent", userAgent);
+        conf.set("segment.conveyor.useragent", userAgent);
         conf.setLong("segment.conveyor.sleep.time", sleepTime);
 
         Job job = new Job(conf);
